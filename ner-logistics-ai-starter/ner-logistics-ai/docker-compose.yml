@@ -1,0 +1,14 @@
+services:
+  db:
+    image: postgis/postgis:16-3.5
+    environment:
+      POSTGRES_DB: ner_logistics
+      POSTGRES_USER: ner
+      POSTGRES_PASSWORD: ner_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
