@@ -36,3 +36,6 @@ Thumbs.db
 
 # Database / Volumes
 pgdata/
+
+# TypeScript build info
+*.tsbuildinfo
