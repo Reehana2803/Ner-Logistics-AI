@@ -5,12 +5,12 @@ try:
     from app.schemas import AssessmentRequest, DecisionRequest, RouteRequest
     from app.ai.risk_engine import assess_delivery
     from app.services.decision_gate import validate_decision
-    from app.services.routing import optimize_route
+    from app.services.routing import optimize_route, get_all_corridors
 except ImportError:
     from schemas import AssessmentRequest, DecisionRequest, RouteRequest
     from ai.risk_engine import assess_delivery
     from services.decision_gate import validate_decision
-    from services.routing import optimize_route
+    from services.routing import optimize_route, get_all_corridors
 
 app = FastAPI(
     title="NER Logistics Intelligence API",
@@ -70,6 +70,10 @@ def decision_validate(request: DecisionRequest):
 @app.post("/api/v1/routes/optimize")
 def route_optimize(request: RouteRequest):
     return optimize_route(request)
+
+@app.get("/api/v1/routes/corridors")
+def list_corridors():
+    return get_all_corridors()
 
 @app.get("/api/v1/dashboard")
 def dashboard():

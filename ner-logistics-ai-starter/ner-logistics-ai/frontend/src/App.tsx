@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker, useMap } from "react-leaflet";
 import L from "leaflet";
 import {
   getDashboard,
@@ -7,13 +7,16 @@ import {
   optimize,
   validateDecision,
   checkBackendHealth,
+  getCorridors,
   DashboardData,
   AssessmentResult,
   RouteResult,
-  DecisionResult
+  RouteCandidate,
+  DecisionResult,
+  CorridorOption
 } from "./api";
 
-// Fix Leaflet's default marker icons in Vite
+// Fix Leaflet marker icons in Vite
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
@@ -40,7 +43,7 @@ const VEHICLES_DATA: Vehicle[] = [
   { id: "NER-03", driver: "Anupam Saikia", origin: "Jorhat Depot", destination: "Dibrugarh Medical College", cargo: "Dialysis Consumables", status: "ON_TIME", speed: "58 km/h", eta: "2h 10m", lat: 27.15, lng: 94.60 },
   { id: "NER-04", driver: "Tenzing Lhaden", origin: "Tezpur Depot", destination: "Itanagar State Hospital", cargo: "Surgical Equipment", status: "DELAYED", speed: "28 km/h", eta: "3h 45m", lat: 26.90, lng: 93.30 },
   { id: "NER-05", driver: "Lalthan Sanga", origin: "Silchar Hub", destination: "Aizawl Civil Hospital", cargo: "Oxygen Cylinders", status: "AT_RISK", speed: "22 km/h", eta: "5h 30m", lat: 24.30, lng: 92.70 },
-  { id: "NER-06", driver: "Sanjay Singha", origin: "Guwahati Hub", destination: "Nagaon District Hospital", cargo: "Anti-venom Kits", status: "ON_TIME", speed: "60 km/h", eta: "1h 40m", lat: 26.25, lng: 92.40 },
+  { id: "NER-06", driver: "Sanjay Singha", origin: "Guwahati Hub", destination: "Agartala Medical Center", cargo: "Critical ICU Monitor", status: "ON_TIME", speed: "55 km/h", eta: "8h 10m", lat: 24.50, lng: 92.10 },
 ];
 
 const INCIDENTS_DATA = [
@@ -55,20 +58,34 @@ const HOSPITALS_DATA = [
   { name: "NEIGRIHMS Shillong", state: "Meghalaya", stockRemaining: "18.0 hours", oxygenStatus: "NORMAL", priority: 2, contact: "+91 364 2538011" },
   { name: "Aizawl Civil Hospital", state: "Mizoram", stockRemaining: "6.0 hours", oxygenStatus: "WARNING", priority: 1, contact: "+91 389 2322318" },
   { name: "Dibrugarh Medical College", state: "Assam", stockRemaining: "24.0 hours", oxygenStatus: "ADEQUATE", priority: 3, contact: "+91 373 2300080" },
-  { name: "Tomo Riba Institute (TRIHMS)", state: "Arunachal Pradesh", stockRemaining: "9.5 hours", oxygenStatus: "NORMAL", priority: 2, contact: "+91 360 2350438" },
+  { name: "Itanagar State Hospital", state: "Arunachal Pradesh", stockRemaining: "9.5 hours", oxygenStatus: "NORMAL", priority: 2, contact: "+91 360 2350438" },
+  { name: "Agartala Medical Center", state: "Tripura", stockRemaining: "12.0 hours", oxygenStatus: "NORMAL", priority: 2, contact: "+91 381 2357005" },
 ];
+
+// Helper to smooth pan map when corridor changes
+function MapRecenter({ center, zoom }: { center: [number, number]; zoom: number }) {
+  const map = useMap();
+  useEffect(() => {
+    map.setView(center, zoom);
+  }, [center, zoom, map]);
+  return null;
+}
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>("Dashboard");
   const [data, setData] = useState<DashboardData | null>(null);
   const [backendOnline, setBackendOnline] = useState<boolean>(false);
+  const [corridors, setCorridors] = useState<CorridorOption[]>([]);
+  const [selectedCorridorKey, setSelectedCorridorKey] = useState<string>("Guwahati Hub -> Silchar Civil Hospital");
+  const [activeCandidateIdx, setActiveCandidateIdx] = useState<number>(0);
+
   const [risk, setRisk] = useState<AssessmentResult | null>(null);
   const [route, setRoute] = useState<RouteResult | null>(null);
   const [decision, setDecision] = useState<DecisionResult | null>(null);
   const [loadingAI, setLoadingAI] = useState<boolean>(false);
   const [loadingRoute, setLoadingRoute] = useState<boolean>(false);
 
-  // Interactive Assessment Simulation Inputs
+  // Simulation inputs
   const [rainfall, setRainfall] = useState<number>(95);
   const [wind, setWind] = useState<number>(35);
   const [landslideProb, setLandslideProb] = useState<number>(0.65);
@@ -79,20 +96,47 @@ export default function App() {
   const [hospitalStock, setHospitalStock] = useState<number>(5);
   const [priority, setPriority] = useState<number>(1);
 
-  // Route selector inputs
-  const [origin, setOrigin] = useState<string>("Guwahati Hub");
-  const [destination, setDestination] = useState<string>("Silchar Civil Hospital");
-
+  // Load initial corridors and trigger initial route optimization
   useEffect(() => {
-    // Initial data load and health check
     checkBackendHealth().then(setBackendOnline);
     getDashboard().then(setData);
+
+    getCorridors().then((cList) => {
+      setCorridors(cList);
+      if (cList.length > 0) {
+        loadRouteForCorridor(cList[0].origin, cList[0].destination, true);
+      }
+    });
 
     const interval = setInterval(() => {
       checkBackendHealth().then(setBackendOnline);
     }, 10000);
     return () => clearInterval(interval);
   }, []);
+
+  async function loadRouteForCorridor(orig: string, dest: string, isBlocked: boolean = roadBlocked) {
+    setLoadingRoute(true);
+    try {
+      const res = await optimize({
+        origin: orig,
+        destination: dest,
+        blocked_roads: isBlocked ? ["NH-6 / Sonapur Tunnel"] : [],
+        priority,
+      });
+      setRoute(res);
+      setActiveCandidateIdx(0);
+    } finally {
+      setLoadingRoute(false);
+    }
+  }
+
+  function handleCorridorChange(corridorId: string) {
+    setSelectedCorridorKey(corridorId);
+    const chosen = corridors.find((c) => c.id === corridorId);
+    if (chosen) {
+      loadRouteForCorridor(chosen.origin, chosen.destination);
+    }
+  }
 
   async function handleRunAI() {
     setLoadingAI(true);
@@ -110,7 +154,6 @@ export default function App() {
       });
       setRisk(res);
 
-      // Also validate decision with A-TRUST gate
       const dec = await validateDecision({
         route_risk: res.risk_score,
         ai_confidence: res.ai_confidence,
@@ -126,24 +169,12 @@ export default function App() {
     }
   }
 
-  async function handleRunRoute() {
-    setLoadingRoute(true);
-    try {
-      const res = await optimize({
-        origin,
-        destination,
-        blocked_roads: roadBlocked ? ["NH-6 / Sonapur Tunnel"] : [],
-        priority,
-      });
-      setRoute(res);
-    } finally {
-      setLoadingRoute(false);
-    }
-  }
+  const activeRouteCandidate: RouteCandidate | undefined = route?.candidates?.[activeCandidateIdx] || route?.recommended;
+  const mapCenter: [number, number] = route?.origin_coords || [26.0, 92.5];
 
   return (
     <div className="app">
-      {/* Sidebar Navigation */}
+      {/* Sidebar */}
       <aside>
         <div className="brand">
           <h2>NER<span>AI</span></h2>
@@ -172,27 +203,58 @@ export default function App() {
           <div className="backend-status">
             <span className={`status-dot ${backendOnline ? "online" : "offline"}`}></span>
             <div>
-              <small>{backendOnline ? "API Online" : "Demo / Offline"}</small>
+              <small>{backendOnline ? "API Online" : "Demo Mode"}</small>
               <b>{backendOnline ? "Port 8000" : "Local Mock"}</b>
             </div>
           </div>
         </div>
       </aside>
 
-      {/* Main Content Area */}
+      {/* Main Container */}
       <main>
         <header>
           <div>
             <h1>NER Logistics Command Center</h1>
-            <p>North Eastern Region Real-Time Supply Chain & AI Safety Platform</p>
+            <p>North Eastern Region Real-Time Supply Chain & Multi-Corridor AI Safety Platform</p>
           </div>
           <div className="header-badges">
             <div className={`connection-badge ${backendOnline ? "connected" : "standalone"}`}>
-              {backendOnline ? "● BACKEND CONNECTED" : "● DEMO SIMULATION MODE"}
+              {backendOnline ? "● BACKEND CONNECTED" : "● DEMO / SIMULATION MODE"}
             </div>
             <div className="live">● LIVE TELEMETRY</div>
           </div>
         </header>
+
+        {/* Global Route Corridor Switcher Bar */}
+        <section className="corridor-bar">
+          <div className="corridor-bar-left">
+            <span className="corridor-label">🧭 Active Transit Corridor:</span>
+            <select
+              className="corridor-select"
+              value={selectedCorridorKey}
+              onChange={(e) => handleCorridorChange(e.target.value)}
+            >
+              {corridors.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.origin} ➔ {c.destination} ({c.distance_km} km | ~{c.default_eta} hrs)
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="corridor-bar-right">
+            <button
+              className="quick-route-btn"
+              onClick={() => {
+                const chosen = corridors.find((c) => c.id === selectedCorridorKey);
+                if (chosen) loadRouteForCorridor(chosen.origin, chosen.destination);
+              }}
+              disabled={loadingRoute}
+            >
+              {loadingRoute ? "Optimizing..." : "⚡ Recalculate Corridor"}
+            </button>
+          </div>
+        </section>
 
         {/* Top Metric Cards */}
         <section className="cards">
@@ -200,7 +262,7 @@ export default function App() {
           <Card label="On Schedule" value={data?.on_time ?? 7} />
           <Card label="Delayed / Detoured" value={data?.delayed ?? 3} />
           <Card label="At Severe Risk" value={data?.at_risk ?? 2} danger />
-          <Card label="Critical Medical Shipments" value={data?.critical_deliveries ?? 2} highlight />
+          <Card label="Corridor Distance" value={activeRouteCandidate?.distance_km ? `${activeRouteCandidate.distance_km} km` : "345 km"} highlight />
         </section>
 
         {/* Tab 1: Dashboard View */}
@@ -209,55 +271,74 @@ export default function App() {
             <section className="grid">
               <div className="panel map-panel">
                 <div className="panel-header">
-                  <div className="panel-title">Regional Situation Map (Assam & Meghalaya Corridors)</div>
+                  <div>
+                    <div className="panel-title">Active Corridor Map: {route?.origin} ➔ {route?.destination}</div>
+                    <small className="muted">{activeRouteCandidate?.via || "Direct Regional Transit"}</small>
+                  </div>
                   <span className="badge-subtle">Leaflet GIS Live</span>
                 </div>
+
+                {/* Candidate Route Tabs */}
+                {route && route.candidates.length > 1 && (
+                  <div className="candidate-selector-tabs">
+                    {route.candidates.map((cand, idx) => (
+                      <button
+                        key={idx}
+                        className={`candidate-tab ${activeCandidateIdx === idx ? "active" : ""}`}
+                        onClick={() => setActiveCandidateIdx(idx)}
+                      >
+                        {idx === 0 ? "★ AI Recommended: " : "Alternative: "}
+                        <b>{cand.name.split("(")[0]}</b> ({cand.eta_hours}h | {(cand.risk * 100).toFixed(0)}% risk)
+                      </button>
+                    ))}
+                  </div>
+                )}
+
                 <div className="leaflet-wrapper">
-                  <MapContainer center={[26.0, 92.5]} zoom={7} scrollWheelZoom style={{ height: "420px", width: "100%" }}>
+                  <MapContainer center={mapCenter} zoom={7} scrollWheelZoom style={{ height: "420px", width: "100%" }}>
+                    <MapRecenter center={mapCenter} zoom={7} />
                     <TileLayer
                       attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
                       url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                     />
-                    {/* Main Logistics Hubs */}
-                    <Marker position={[26.1445, 91.7362]}>
-                      <Popup>
-                        <strong>Guwahati Central Logistics Hub</strong><br />
-                        Fleet Depot & Medical Storage Dispatch
-                      </Popup>
-                    </Marker>
-                    <Marker position={[24.8333, 92.7789]}>
-                      <Popup>
-                        <strong>Silchar Civil Hospital Hub</strong><br />
-                        Barak Valley Destination (Critical Supply Alert)
-                      </Popup>
-                    </Marker>
-                    <Marker position={[25.5788, 91.8933]}>
-                      <Popup>
-                        <strong>NEIGRIHMS Shillong</strong><br />
-                        Secondary Medical Depot
-                      </Popup>
-                    </Marker>
-                    <Marker position={[27.4728, 94.912]}>
-                      <Popup>
-                        <strong>Dibrugarh Medical Depot</strong><br />
-                        Upper Assam Logistics Terminal
-                      </Popup>
-                    </Marker>
 
-                    {/* Standard Route Polyline */}
-                    <Polyline
-                      positions={[
-                        [26.1445, 91.7362],
-                        [25.5788, 91.8933],
-                        [25.18, 92.35],
-                        [24.8333, 92.7789]
-                      ]}
-                      color="#0b7a55"
-                      weight={4}
-                      dashArray="8, 6"
-                    />
+                    {/* Corridor Origin Marker */}
+                    {route?.origin_coords && (
+                      <Marker position={route.origin_coords}>
+                        <Popup><strong>{route.origin}</strong><br />Corridor Origin Terminal</Popup>
+                      </Marker>
+                    )}
 
-                    {/* Vehicle Markers */}
+                    {/* Corridor Destination Marker */}
+                    {route?.destination_coords && (
+                      <Marker position={route.destination_coords}>
+                        <Popup><strong>{route.destination}</strong><br />Destination Hub / Hospital</Popup>
+                      </Marker>
+                    )}
+
+                    {/* Active Route Waypoints Polyline */}
+                    {activeRouteCandidate?.waypoints && (
+                      <Polyline
+                        positions={activeRouteCandidate.waypoints}
+                        color={activeCandidateIdx === 0 ? "#0b7a55" : "#1d4ed8"}
+                        weight={5}
+                      />
+                    )}
+
+                    {/* Alternative Route Ghost Polyline */}
+                    {route?.candidates && route.candidates.map((c, i) => (
+                      i !== activeCandidateIdx && c.waypoints ? (
+                        <Polyline
+                          key={i}
+                          positions={c.waypoints}
+                          color="#94a3b8"
+                          weight={3}
+                          dashArray="6, 6"
+                        />
+                      ) : null
+                    ))}
+
+                    {/* Live Vehicles */}
                     {VEHICLES_DATA.map((v) => (
                       <CircleMarker
                         key={v.id}
@@ -268,7 +349,7 @@ export default function App() {
                       >
                         <Popup>
                           <strong>{v.id} — {v.driver}</strong><br />
-                          Destination: {v.destination}<br />
+                          {v.origin} ➔ {v.destination}<br />
                           Cargo: {v.cargo}<br />
                           Speed: {v.speed} | Status: <b>{v.status}</b>
                         </Popup>
@@ -276,6 +357,16 @@ export default function App() {
                     ))}
                   </MapContainer>
                 </div>
+
+                {/* Waypoint details bar */}
+                {activeRouteCandidate && (
+                  <div className="active-route-meta">
+                    <div><span>Active Route:</span> <b>{activeRouteCandidate.name}</b></div>
+                    <div><span>Transit Distance:</span> <b>{activeRouteCandidate.distance_km} km</b></div>
+                    <div><span>ETA:</span> <b>{activeRouteCandidate.eta_hours} hrs</b></div>
+                    <div><span>Status:</span> <b className={activeRouteCandidate.status.includes("BLOCK") ? "danger-text" : "pass-text"}>{activeRouteCandidate.status}</b></div>
+                  </div>
+                )}
               </div>
 
               {/* Active Alerts Panel */}
@@ -328,29 +419,40 @@ export default function App() {
               </div>
 
               <div className="panel">
-                <div className="panel-title">Dynamic Route Optimization</div>
+                <div className="panel-title">Dynamic Corridor Optimizer</div>
                 <p className="description-text">
-                  Priority-aware detour routing taking into account active NH-6 Sonapur landslides.
+                  Multi-objective route selector balancing emergency medical priority against seasonal hazards.
                 </p>
-                <div className="route-selectors">
-                  <label>Origin Hub: <b>Guwahati Hub</b></label>
-                  <label>Destination: <b>Silchar Civil Hospital</b></label>
+
+                <div className="corridor-switch-btns">
+                  <small className="muted">Switch Corridor:</small>
+                  <div className="pill-btn-group">
+                    {corridors.map((c) => (
+                      <button
+                        key={c.id}
+                        className={`pill-btn ${selectedCorridorKey === c.id ? "active" : ""}`}
+                        onClick={() => handleCorridorChange(c.id)}
+                      >
+                        {c.destination.replace("Civil Hospital", "").replace("Medical College", "").replace("State Hospital", "").replace("Medical Center", "").trim()}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <button className="primary-btn" onClick={handleRunRoute} disabled={loadingRoute}>
-                  {loadingRoute ? "Computing Alternative Routes..." : "🛣️ Find Safe & Optimized Route"}
-                </button>
-                {route && (
+
+                {activeRouteCandidate && (
                   <div className="result-box pass">
                     <div className="result-header">
-                      <b>{route.recommended.name}</b>
-                      <span className="badge-pass">RECOMMENDED</span>
+                      <b>{activeRouteCandidate.name}</b>
+                      <span className="badge-pass">{activeRouteCandidate.status}</span>
                     </div>
                     <div className="metrics-row">
-                      <div><span>Estimated Transit</span><b>{route.recommended.eta_hours} hrs</b></div>
-                      <div><span>Calculated Risk</span><b>{(route.recommended.risk * 100).toFixed(0)}%</b></div>
-                      <div><span>Highway Status</span><b>{route.recommended.status}</b></div>
+                      <div><span>Distance</span><b>{activeRouteCandidate.distance_km} km</b></div>
+                      <div><span>ETA</span><b>{activeRouteCandidate.eta_hours} hrs</b></div>
+                      <div><span>Calculated Risk</span><b>{(activeRouteCandidate.risk * 100).toFixed(0)}%</b></div>
                     </div>
-                    <small className="muted">Priority-aware routing avoiding active Sonapur road closure.</small>
+                    {activeRouteCandidate.hazards && (
+                      <small className="muted">Hazards: {activeRouteCandidate.hazards.join(", ")}</small>
+                    )}
                   </div>
                 )}
               </div>
@@ -362,26 +464,75 @@ export default function App() {
         {activeTab === "Live Map" && (
           <section className="panel">
             <div className="panel-header">
-              <div className="panel-title">Interactive Northeast Transit Grid & Telemetry</div>
-              <span className="live-pill">Live GPS Streams Active</span>
+              <div className="panel-title">Northeast Regional Multi-Route Transit Grid</div>
+              <div className="corridor-select-compact">
+                <select
+                  className="corridor-select"
+                  value={selectedCorridorKey}
+                  onChange={(e) => handleCorridorChange(e.target.value)}
+                >
+                  {corridors.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.origin} ➔ {c.destination} ({c.distance_km} km)
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
+
+            {/* Candidate Route Buttons */}
+            {route && route.candidates.length > 1 && (
+              <div className="candidate-selector-tabs">
+                {route.candidates.map((cand, idx) => (
+                  <button
+                    key={idx}
+                    className={`candidate-tab ${activeCandidateIdx === idx ? "active" : ""}`}
+                    onClick={() => setActiveCandidateIdx(idx)}
+                  >
+                    Route Option {idx + 1}: <b>{cand.name}</b> ({cand.distance_km} km | {cand.eta_hours}h)
+                  </button>
+                ))}
+              </div>
+            )}
+
             <div className="leaflet-wrapper full-map">
-              <MapContainer center={[26.0, 92.5]} zoom={7} scrollWheelZoom style={{ height: "600px", width: "100%" }}>
+              <MapContainer center={mapCenter} zoom={7} scrollWheelZoom style={{ height: "600px", width: "100%" }}>
+                <MapRecenter center={mapCenter} zoom={7} />
                 <TileLayer
                   attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
                   url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
-                {/* Major Nodes */}
-                <Marker position={[26.1445, 91.7362]}><Popup><strong>Guwahati Central Hub</strong></Popup></Marker>
-                <Marker position={[24.8333, 92.7789]}><Popup><strong>Silchar Civil Hospital</strong></Popup></Marker>
-                <Marker position={[25.5788, 91.8933]}><Popup><strong>NEIGRIHMS Shillong</strong></Popup></Marker>
-                <Marker position={[27.4728, 94.912]}><Popup><strong>Dibrugarh Hospital</strong></Popup></Marker>
-                <Marker position={[23.8315, 91.2868]}><Popup><strong>Agartala Medical Center</strong></Popup></Marker>
-                <Marker position={[24.817, 93.9368]}><Popup><strong>Imphal RIMS</strong></Popup></Marker>
 
-                {/* Primary Corridors */}
-                <Polyline positions={[[26.1445, 91.7362], [25.5788, 91.8933], [24.8333, 92.7789]]} color="#0b7a55" weight={5} />
-                <Polyline positions={[[26.1445, 91.7362], [26.9, 93.3], [27.4728, 94.912]]} color="#1565c0" weight={4} dashArray="5,5" />
+                {/* Major Terminals */}
+                <Marker position={[26.1445, 91.7362]}><Popup><strong>Guwahati Central Logistics Hub</strong></Popup></Marker>
+                <Marker position={[24.8333, 92.7789]}><Popup><strong>Silchar Civil Hospital Hub</strong></Popup></Marker>
+                <Marker position={[25.5788, 91.8933]}><Popup><strong>NEIGRIHMS Shillong</strong></Popup></Marker>
+                <Marker position={[27.4728, 94.912]}><Popup><strong>Dibrugarh Medical Center</strong></Popup></Marker>
+                <Marker position={[27.0844, 93.6053]}><Popup><strong>Itanagar State Hospital</strong></Popup></Marker>
+                <Marker position={[23.7307, 92.7173]}><Popup><strong>Aizawl Civil Hospital</strong></Popup></Marker>
+                <Marker position={[23.8315, 91.2868]}><Popup><strong>Agartala Medical Center</strong></Popup></Marker>
+
+                {/* Active Waypoints Line */}
+                {activeRouteCandidate?.waypoints && (
+                  <Polyline
+                    positions={activeRouteCandidate.waypoints}
+                    color="#059669"
+                    weight={6}
+                  />
+                )}
+
+                {/* Alternative Paths */}
+                {route?.candidates && route.candidates.map((c, i) => (
+                  i !== activeCandidateIdx && c.waypoints ? (
+                    <Polyline
+                      key={i}
+                      positions={c.waypoints}
+                      color="#3b82f6"
+                      weight={4}
+                      dashArray="8, 6"
+                    />
+                  ) : null
+                ))}
 
                 {/* Active Vehicles */}
                 {VEHICLES_DATA.map((v) => (

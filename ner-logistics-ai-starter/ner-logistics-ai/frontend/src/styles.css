@@ -662,3 +662,153 @@ header p {
     padding: 16px;
   }
 }
+
+/* Corridor Bar & Route Selector Styles */
+.corridor-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 14px 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.corridor-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+
+.corridor-label {
+  font-weight: 700;
+  font-size: 14px;
+  color: #1e293b;
+}
+
+.corridor-select {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+  cursor: pointer;
+  outline: none;
+  min-width: 380px;
+}
+
+.corridor-select:focus {
+  border-color: #047857;
+  box-shadow: 0 0 0 2px rgba(4, 120, 87, 0.2);
+}
+
+.quick-route-btn {
+  background: #047857;
+  color: #ffffff;
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.quick-route-btn:hover {
+  background: #065f46;
+}
+
+.candidate-selector-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  overflow-x: auto;
+}
+
+.candidate-tab {
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: #334155;
+}
+
+.candidate-tab.active {
+  background: #dcfce7;
+  border-color: #047857;
+  color: #065f46;
+  font-weight: 700;
+}
+
+.active-route-meta {
+  display: flex;
+  justify-content: space-between;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.active-route-meta span {
+  color: #64748b;
+  margin-right: 4px;
+}
+
+.pass-text {
+  color: #15803d;
+}
+
+.danger-text {
+  color: #b91c1c;
+}
+
+.corridor-switch-btns {
+  margin: 14px 0;
+}
+
+.pill-btn-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.pill-btn {
+  padding: 6px 12px;
+  border-radius: 20px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.pill-btn:hover {
+  background: #f1f5f9;
+}
+
+.pill-btn.active {
+  background: #047857;
+  color: #ffffff;
+  border-color: #047857;
+}
+
+.corridor-select-compact select {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  font-size: 13px;
+  font-weight: 600;
+}
